@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: elyx-postgres
+    environment:
+      POSTGRES_DB: elyx_care_chronicle
+      POSTGRES_USER: elyx_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-elyx_secure_password_2024}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - elyx-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elyx_user -d elyx_care_chronicle"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API (Port 3000)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: elyx-backend
+    environment:
+      DATABASE_URL: postgresql://elyx_user:${DB_PASSWORD:-elyx_secure_password_2024}@postgres:5432/elyx_care_chronicle
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: ${FRONTEND_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    networks:
+      - elyx-network
+    restart: unless-stopped
+    volumes:
+      - ./backend/logs:/app/logs
+
+  # Frontend React App (Port 3001)
+  frontend:
+    build:
+      context: ./elyx-care-chronicle-frontend
+      dockerfile: Dockerfile
+    container_name: elyx-frontend
+    environment:
+      REACT_APP_API_URL: ${BACKEND_URL:-http://localhost:3000}
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - elyx-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: elyx-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - elyx-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  elyx-network:
+    driver: bridge
